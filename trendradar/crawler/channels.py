@@ -390,6 +390,9 @@ def generate_chinese_summaries(
         client_config["API_BASE"] = api_base.rstrip("/") + "/v3"
     client = AIClient(client_config)
 
+    import time as _time
+    _t0 = _time.time()
+
     # 汇总表：序号 -> (item, 请求对象)
     entries = []
     for it in items:
@@ -444,5 +447,6 @@ def generate_chinese_summaries(
             result.append({**it, "summary": zh})
         else:
             result.append(it)
-    logger.info("AI 摘要完成: %d/%d 条", len(result_map), len(entries))
+    elapsed = _time.time() - _t0
+    logger.info("AI 摘要完成: %d/%d 条，耗时 %.1f 秒（分批 %d 条/批）", len(result_map), len(entries), elapsed, chunk_size)
     return result

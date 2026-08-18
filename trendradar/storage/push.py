@@ -146,6 +146,11 @@ def apply_remote_config_overrides(config: Dict) -> None:
     api_base = ai.get("base_url") or current.get("API_BASE", "")
     enabled = ai.get("enabled", current.get("ENABLED", False))
 
+    # LiteLLM 要求 model 为 provider/model 格式；面板配置可能为裸模型名
+    # （如火山方舟 deepseek-v4-flash + OpenAI 兼容 api_base），无前缀时统一补 openai/
+    if model and "/" not in model:
+        model = f"openai/{model}"
+
     config["AI"] = {
         **current,
         "MODEL": env.get("AI_MODEL") or model,
