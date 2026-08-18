@@ -1,0 +1,163 @@
+name: Get Hot News
+
+on:
+  schedule:
+    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    # 🕐 运行频率 / Schedule
+    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    # 每 15 分钟运行一次（信息聚合面板数据源，保持数据新鲜）
+    # 已移除原「7 天试用签到」逻辑，作为长期稳定部署
+    #
+    # 说明：GitHub Actions 调度 cron 使用 UTC 时间
+    #   "*/15 * * * *" = 每 15 分钟运行一次（0:00, 0:15, 0:30, 0:45 ...）
+    #
+    - cron: "*/15 * * * *"
+
+  workflow_dispatch:
+
+concurrency:
+  group: crawler-${{ github.ref_name }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  actions: write
+
+jobs:
+  crawl:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
+          clean: true
+
+
+      # --------------------------------------------------------------------------------
+      # 🚦 TRAFFIC CONTROL / 流量控制
+      # --------------------------------------------------------------------------------
+      # EN: Generates a random delay between 1 and 300 seconds (5 minutes).
+      #     Critical for load balancing.
+      #
+      # CN: 生成 1 到 300 秒（5分钟）之间的随机延迟。
+      #     这对负载均衡至关重要。
+      # - name: Random Delay (Traffic Control)
+      #   if: success()
+      #   run: |
+      #     echo "🎲 Traffic Control: Generating random delay..."
+      #     DELAY=$(( ( RANDOM % 300 )  + 1 ))
+      #     echo "⏸️  Sleeping for ${DELAY} seconds to spread the load..."
+      #     sleep ${DELAY}s
+      #     echo "▶️  Delay finished. Starting crawler..."
+
+      - name: Set up Python
+        if: success()
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install uv
+        if: success()
+        uses: astral-sh/setup-uv@v7
+
+      - name: Install dependencies
+        if: success()
+        run: uv sync --frozen --no-dev
+
+      # smzdm 数码好价抓取需要 Playwright Chromium（绕过 smzdm JS 反爬）
+      - name: Install Playwright Chromium
+        if: success()
+        run: |
+          uv run playwright install --with-deps chromium
+
+      - name: Verify required files
+        if: success()
+        run: |
+          if [ ! -f config/config.yaml ]; then
+            echo "Error: Config missing"
+            exit 1
+          fi
+
+      - name: Run crawler
+        if: success()
+        env:
+          FEISHU_WEBHOOK_URL: ${{ secrets.FEISHU_WEBHOOK_URL }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          DINGTALK_WEBHOOK_URL: ${{ secrets.DINGTALK_WEBHOOK_URL }}
+          WEWORK_WEBHOOK_URL: ${{ secrets.WEWORK_WEBHOOK_URL }}
+          WEWORK_MSG_TYPE: ${{ secrets.WEWORK_MSG_TYPE }}
+          EMAIL_FROM: ${{ secrets.EMAIL_FROM }}
+          EMAIL_PASSWORD: ${{ secrets.EMAIL_PASSWORD }}
+          EMAIL_TO: ${{ secrets.EMAIL_TO }}
+          EMAIL_SMTP_SERVER: ${{ secrets.EMAIL_SMTP_SERVER }}
+          EMAIL_SMTP_PORT: ${{ secrets.EMAIL_SMTP_PORT }}
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+          NTFY_SERVER_URL: ${{ secrets.NTFY_SERVER_URL }}
+          NTFY_TOKEN: ${{ secrets.NTFY_TOKEN }}
+          BARK_URL: ${{ secrets.BARK_URL }}
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          # 通用Webhook配置
+          GENERIC_WEBHOOK_URL: ${{ secrets.GENERIC_WEBHOOK_URL }}
+          GENERIC_WEBHOOK_TEMPLATE: ${{ secrets.GENERIC_WEBHOOK_TEMPLATE }}
+          # AI 配置（ai_analysis 和 ai_translation 共享模型配置）
+          AI_ANALYSIS_ENABLED: ${{ secrets.AI_ANALYSIS_ENABLED }}
+          AI_API_KEY: ${{ secrets.AI_API_KEY }}
+          AI_MODEL: ${{ secrets.AI_MODEL }}
+          AI_API_BASE: ${{ secrets.AI_API_BASE }}
+          # 远程存储配置
+          S3_BUCKET_NAME: ${{ secrets.S3_BUCKET_NAME }}
+          S3_ACCESS_KEY_ID: ${{ secrets.S3_ACCESS_KEY_ID }}
+          S3_SECRET_ACCESS_KEY: ${{ secrets.S3_SECRET_ACCESS_KEY }}
+          S3_ENDPOINT_URL: ${{ secrets.S3_ENDPOINT_URL }}
+          S3_REGION: ${{ secrets.S3_REGION }}
+          GITHUB_ACTIONS: true
+        run: uv run python -m trendradar
+
+      # --------------------------------------------------------------------------------
+      # ☁️ CLOUDFLARE PAGES DEPLOY / 部署到 Cloudflare Pages（可选）
+      # --------------------------------------------------------------------------------
+      # 将爬虫生成的 index.html 自动部署到 Cloudflare Pages，国内访问比 GitHub Pages 更快。
+      # 仅当下面三个 Secrets 均已配置时才会执行，缺任意一个则自动跳过，不影响其它流程：
+      #   - CLOUDFLARE_API_TOKEN     权限：Account → Cloudflare Pages → Edit
+      #   - CLOUDFLARE_ACCOUNT_ID    Cloudflare 账户 ID
+      #   - CLOUDFLARE_PROJECT_NAME  Cloudflare Pages 项目名（需提前在 Dashboard 创建）
+      # 配置教程详见 README「自动部署到 Cloudflare Pages」章节。
+      # --------------------------------------------------------------------------------
+      - name: Check Cloudflare config
+        if: success()
+        id: cf_check
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_PROJECT_NAME: ${{ secrets.CLOUDFLARE_PROJECT_NAME }}
+        run: |
+          if [ -n "$CLOUDFLARE_API_TOKEN" ] && [ -n "$CLOUDFLARE_ACCOUNT_ID" ] && [ -n "$CLOUDFLARE_PROJECT_NAME" ]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+            echo "✅ 检测到 Cloudflare 配置，准备部署到 Cloudflare Pages"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "ℹ️ 未配置 Cloudflare Secrets，跳过 Cloudflare Pages 部署"
+          fi
+
+      - name: Prepare Cloudflare Pages assets
+        if: success() && steps.cf_check.outputs.enabled == 'true'
+        run: |
+          if [ ! -f index.html ]; then
+            echo "❌ 未找到 index.html，请确认爬虫已生成网页报告"
+            exit 1
+          fi
+          rm -rf cloudflare_dist
+          mkdir -p cloudflare_dist
+          cp index.html cloudflare_dist/index.html
+
+      - name: Deploy to Cloudflare Pages
+        if: success() && steps.cf_check.outputs.enabled == 'true'
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: pages deploy cloudflare_dist --project-name=${{ secrets.CLOUDFLARE_PROJECT_NAME }}
