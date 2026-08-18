@@ -1664,9 +1664,14 @@ class NewsAnalyzer:
             # AI 功能启用时对英文标题做中文翻译（ai-news / arxiv）
             ai_config = config.get("AI", {})
             if ext.get("ARXIV"):
-                from trendradar.crawler.channels import fetch_arxiv_papers, translate_titles_to_chinese
+                from trendradar.crawler.channels import (
+                    fetch_arxiv_papers,
+                    translate_titles_to_chinese,
+                    generate_chinese_summaries,
+                )
                 result = fetch_arxiv_papers(max_results=20)
                 items = translate_titles_to_chinese(result["items"], ai_config)
+                items = generate_chinese_summaries(items, ai_config, source_summary=True, fallback_from_title=False)
                 channels.append({
                     "id": "arxiv",
                     "name": "arXiv 热点论文",
@@ -1687,9 +1692,14 @@ class NewsAnalyzer:
                     "items": result["items"],
                 })
             if ext.get("AI_NEWS"):
-                from trendradar.crawler.channels import fetch_ai_news, translate_titles_to_chinese
+                from trendradar.crawler.channels import (
+                    fetch_ai_news,
+                    translate_titles_to_chinese,
+                    generate_chinese_summaries,
+                )
                 result = fetch_ai_news(max_items=20)
                 items = translate_titles_to_chinese(result["items"], ai_config)
+                items = generate_chinese_summaries(items, ai_config, source_summary=False, fallback_from_title=True)
                 channels.append({
                     "id": "ai-news",
                     "name": "AI 圈新概念",
