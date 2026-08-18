@@ -288,7 +288,19 @@ def translate_titles_to_chinese(
     ]
 
     try:
-        client = AIClient(ai_config)
+        # LiteLLM 要求 model 为 provider/model 格式；面板配置可能只有裸模型名
+        # （如火山方舟 deepseek-v4-flash，配合 OpenAI 兼容 api_base），
+        # 无前缀时按 OpenAI 兼容协议处理
+        client_config = dict(ai_config)
+        model = client_config.get("MODEL", "")
+        if model and "/" not in model:
+            client_config["MODEL"] = f"openai/{model}"
+        # 火山方舟 OpenAI 兼容端点为 {base}/v3/chat/completions，
+        # 面板配置的 base_url 可能省略 /v3（LiteLLM 拼接后 404），此处自动补全
+        api_base = client_config.get("API_BASE", "") or ""
+        if api_base and "volces.com" in api_base and "/v3" not in f"{api_base}/":
+            client_config["API_BASE"] = api_base.rstrip("/") + "/v3"
+        client = AIClient(client_config)
         raw = client.chat(messages, temperature=0.2, max_tokens=4096)
         # 提取 JSON（模型可能包裹 ```json ... ``` 或夹杂说明）
         m = re.search(r"\{.*\}", raw, re.S)
