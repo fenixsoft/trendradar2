@@ -67,11 +67,9 @@ jobs:
         if: success()
         run: uv sync --frozen --no-dev
 
-      # smzdm 数码好价抓取需要 Playwright Chromium（绕过 smzdm JS 反爬）
-      - name: Install Playwright Chromium
-        if: success()
-        run: |
-          uv run playwright install --with-deps chromium
+      # ⚠️ 注：smzdm 渠道默认禁用（GitHub Actions 数据中心 IP 被 smzdm WAF 拦截）。
+      #   如需启用，请先在 config.yaml 打开 smzdm.enabled，并在本步骤安装 Playwright Chromium：
+      #   uv run playwright install --with-deps chromium
 
       - name: Verify required files
         if: success()
