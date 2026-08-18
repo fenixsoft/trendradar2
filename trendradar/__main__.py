@@ -1659,6 +1659,42 @@ class NewsAnalyzer:
                         "items": items,
                     })
 
+            # 扩展渠道（服务端轻量数据源，无浏览器依赖）
+            ext = agg.get("EXTENDED_CHANNELS", {})
+            if ext.get("ARXIV"):
+                from trendradar.crawler.channels import fetch_arxiv_papers
+                result = fetch_arxiv_papers(max_results=20)
+                channels.append({
+                    "id": "arxiv",
+                    "name": "arXiv 热点论文",
+                    "fetched_at": result["fetched_at"],
+                    "status": "ok" if result["ok"] else "error",
+                    "error": result.get("error", ""),
+                    "items": result["items"],
+                })
+            if ext.get("SMTH_DAILY"):
+                from trendradar.crawler.channels import fetch_smth_daily_top
+                result = fetch_smth_daily_top(max_items=10)
+                channels.append({
+                    "id": "smth-daily",
+                    "name": "水木每日十大热门",
+                    "fetched_at": result["fetched_at"],
+                    "status": "ok" if result["ok"] else "error",
+                    "error": result.get("error", ""),
+                    "items": result["items"],
+                })
+            if ext.get("AI_NEWS"):
+                from trendradar.crawler.channels import fetch_ai_news
+                result = fetch_ai_news(max_items=20)
+                channels.append({
+                    "id": "ai-news",
+                    "name": "AI 圈新概念",
+                    "fetched_at": result["fetched_at"],
+                    "status": "ok" if result["ok"] else "error",
+                    "error": result.get("error", ""),
+                    "items": result["items"],
+                })
+
             # smzdm（什么值得买）数码好价渠道（默认关闭，受 WAF 拦截限制）
             smzdm_cfg = config.get("SMZDM", {})
             if smzdm_cfg.get("ENABLED"):
