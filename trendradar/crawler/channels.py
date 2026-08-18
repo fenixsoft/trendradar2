@@ -107,6 +107,8 @@ def fetch_arxiv_papers(
 # ============================================================
 # 2. 水木社区每日十大热门话题
 # ============================================================
+# 官方十大热门 RSS：含标题、文章链接、时间，一次请求（GB2312 编码）
+SMTH_TOPTEN_RSS_URL = "https://www.newsmth.net/nForum/rss/topten"
 SMTH_BBSLISTS_URL = "https://www.newsmth.net/nForum/board/BBSLists"
 SMTH_ARTICLE_URL = "https://www.newsmth.net/nForum/article/BBSLists/{aid}"
 
@@ -153,56 +155,45 @@ def _parse_smth_top10(html: str) -> List[Dict]:
     return items
 
 
-def _match_board_article(section: str, title: str) -> Optional[str]:
-    """
-    在十大话题所属板块页按标题匹配具体文章链接。
-
-    十大榜单本身不含帖子直链，需在板块文章列表里按标题匹配。
-    匹配不到返回 None（调用方回退板块地址）。
-    """
-    try:
-        html = _smth_fetch(f"https://www.newsmth.net/nForum/board/{section}")
-    except Exception as e:  # noqa: BLE001
-        logger.warning("水木板块 %s 抓取失败: %s", section, str(e)[:100])
-        return None
-    for m in re.finditer(r'/nForum/article/([A-Za-z0-9_]+)/(\d+)\"[^>]*>([^<]{4,80})<', html):
-        if title.strip() in m.group(3):
-            return f"https://www.newsmth.net/nForum/article/{m.group(1)}/{m.group(2)}"
-    return None
-
-
 def fetch_smth_daily_top(max_items: int = 10) -> Dict:
     """
-    抓取水木社区每日十大热门话题（BBSLists 版自动发帖）。
+    抓取水木社区每日十大热门话题（官方 rss/topten）。
 
-    每条话题在所属板块页按标题匹配文章链接（十大榜单不含直链）；
-    匹配不到时回退板块地址，保证链接可打开。
+    RSS 直接含标题、文章链接、发布时间（GB2312 编码），无需额外匹配。
 
     Returns:
         {"ok": bool, "items": List[Dict], "fetched_at": str, "error": str}
+        item: {"title", "url", "published_at"(ISO), "category", "rank", "extra"}
     """
     try:
-        board_html = _smth_fetch(SMTH_BBSLISTS_URL)
-        # 找最新一篇「十大热门话题」文章
-        arts = re.findall(r"/nForum/article/BBSLists/(\d+)\"[^>]*>([^<]{4,40})<", board_html)
-        target_aid = None
-        for aid, text in arts:
-            text = text.strip()
-            if "十大热门话题" in text and "祝福" not in text:
-                target_aid = aid
-                break
-        if not target_aid:
-            return {"ok": False, "items": [], "fetched_at": _now_iso(), "error": "未找到十大热门话题文章"}
-        article_html = _smth_fetch(SMTH_ARTICLE_URL.format(aid=target_aid))
-        items = _parse_smth_top10(article_html)[:max_items]
-        # 为每条话题匹配所属板块的具体文章链接
-        for it in items:
-            art_url = _match_board_article(it["category"], it["title"])
-            it["url"] = art_url or f"https://www.newsmth.net/nForum/board/{it['category']}"
-        return {"ok": True, "items": items, "fetched_at": _now_iso(), "error": ""}
+        resp = requests.get(SMTH_TOPTEN_RSS_URL, headers=HEADERS, timeout=TIMEOUT)
+        resp.raise_for_status()
+        xml_text = resp.content.decode("gb2312", errors="replace")
+        all_items = _parse_rss_items(xml_text)
     except Exception as e:  # noqa: BLE001
         logger.warning("水木每日热门抓取失败: %s", e)
         return {"ok": False, "items": [], "fetched_at": _now_iso(), "error": str(e)[:150]}
+
+    # pubDate(RFC 822) → ISO 8601，供面板统一解析
+    from email.utils import parsedate_to_datetime
+    items = []
+    for i, it in enumerate(all_items[:max_items], 1):
+        pub = it.get("published_at", "")
+        iso = pub
+        if pub:
+            try:
+                iso = parsedate_to_datetime(pub).astimezone().isoformat()
+            except Exception:  # noqa: BLE001
+                pass
+        items.append({
+            "title": it["title"],
+            "url": it["url"],
+            "published_at": iso,
+            "rank": i,
+            "category": "水木",
+            "extra": {"source": "newsmth"},
+        })
+    return {"ok": True, "items": items, "fetched_at": _now_iso(), "error": ""}
 
 
 # ============================================================
