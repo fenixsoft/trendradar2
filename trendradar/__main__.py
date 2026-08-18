@@ -1661,16 +1661,19 @@ class NewsAnalyzer:
 
             # 扩展渠道（服务端轻量数据源，无浏览器依赖）
             ext = agg.get("EXTENDED_CHANNELS", {})
+            # AI 功能启用时对英文标题做中文翻译（ai-news / arxiv）
+            ai_config = config.get("AI", {})
             if ext.get("ARXIV"):
-                from trendradar.crawler.channels import fetch_arxiv_papers
+                from trendradar.crawler.channels import fetch_arxiv_papers, translate_titles_to_chinese
                 result = fetch_arxiv_papers(max_results=20)
+                items = translate_titles_to_chinese(result["items"], ai_config)
                 channels.append({
                     "id": "arxiv",
                     "name": "arXiv 热点论文",
                     "fetched_at": result["fetched_at"],
                     "status": "ok" if result["ok"] else "error",
                     "error": result.get("error", ""),
-                    "items": result["items"],
+                    "items": items,
                 })
             if ext.get("SMTH_DAILY"):
                 from trendradar.crawler.channels import fetch_smth_daily_top
@@ -1684,15 +1687,16 @@ class NewsAnalyzer:
                     "items": result["items"],
                 })
             if ext.get("AI_NEWS"):
-                from trendradar.crawler.channels import fetch_ai_news
+                from trendradar.crawler.channels import fetch_ai_news, translate_titles_to_chinese
                 result = fetch_ai_news(max_items=20)
+                items = translate_titles_to_chinese(result["items"], ai_config)
                 channels.append({
                     "id": "ai-news",
                     "name": "AI 圈新概念",
                     "fetched_at": result["fetched_at"],
                     "status": "ok" if result["ok"] else "error",
                     "error": result.get("error", ""),
-                    "items": result["items"],
+                    "items": items,
                 })
 
             # smzdm（什么值得买）数码好价渠道（默认关闭，受 WAF 拦截限制）

@@ -358,10 +358,9 @@ aggregation:
   storage_push:
     enabled: true                     # 是否启用存储推送渠道（写入 COS，供信息聚合面板读取）
     latest_path: "trendradar/push/latest.json"   # 推送结果对象路径（与面板契约一致）
-    # 作为渠道发布到信息聚合面板的热榜平台 id 列表（如 zhihu 知乎热榜 / tieba 贴吧热榜）
+    # 作为渠道发布到信息聚合面板的热榜平台 id 列表（如 zhihu 知乎热榜）
     # 面板会为每个平台生成一个渠道 Tab，实时展示该平台热榜条目
-    # 注意：贴吧为全站热榜（newsnow 聚合），非特定吧内容
-    platform_channels: ["zhihu", "tieba"]
+    platform_channels: ["zhihu"]
     # 扩展渠道开关（服务端轻量数据源，无浏览器依赖）：
     #   arxiv       arXiv 热点论文（cs.AI/cs.LG/cs.CL 最新提交）
     #   smth_daily  水木社区每日十大热门话题（BBSLists 自动发帖）

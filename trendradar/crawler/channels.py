@@ -13,6 +13,7 @@
 - 时间字段统一为 ISO 字符串，供面板展示
 """
 
+import json
 import logging
 import re
 import xml.etree.ElementTree as ET
@@ -221,3 +222,94 @@ def fetch_ai_news(max_items: int = 20) -> Dict:
             if len(matched) >= max_items:
                 break
     return {"ok": True, "items": matched, "fetched_at": _now_iso(), "error": ""}
+
+
+# ============================================================
+# 4. 批量中文翻译（AI 功能启用时，将标题翻译为简体中文）
+# ============================================================
+def translate_titles_to_chinese(
+    items: List[Dict],
+    ai_config: Dict,
+) -> List[Dict]:
+    """
+    当 AI 功能启用时，将条目标题批量翻译为简体中文。
+
+    使用 TrendRadar 的 AIClient（LiteLLM）一次调用翻译所有标题，
+    返回携带 extra.original_title（原文）的新列表。
+    翻译失败 / AI 未配置 / AI 关闭时，返回原文列表（不中断发布）。
+
+    Args:
+        items: 渠道条目列表（含 title 字段）
+        ai_config: config["AI"]（MODEL/API_KEY/API_BASE/ENABLED）
+
+    Returns:
+        翻译后的条目列表（失败时等同原文）
+    """
+    if not items:
+        return items
+
+    # 仅当 AI 功能启用且配置了模型/密钥时翻译
+    if not ai_config.get("ENABLED"):
+        return items
+    model = ai_config.get("MODEL", "")
+    api_key = ai_config.get("API_KEY", "") or ""
+    if not model or not api_key:
+        logger.warning("AI 翻译跳过：未配置模型或密钥")
+        return items
+
+    try:
+        from trendradar.ai.client import AIClient
+    except Exception as e:  # noqa: BLE001
+        logger.warning("AI 翻译跳过：无法导入 AIClient: %s", e)
+        return items
+
+    # 构造批量翻译请求（编号 + 原文标题）
+    mapping = {}
+    numbered = []
+    for i, it in enumerate(items, 1):
+        title = (it.get("title") or "").strip()
+        if not title:
+            continue
+        mapping[str(i)] = it
+        numbered.append(f'"{i}": "{title}"')
+    if not numbered:
+        return items
+
+    user_content = "{" + ", ".join(numbered) + "}"
+    messages = [
+        {
+            "role": "system",
+            "content": (
+                "你是一名专业翻译。将用户提供的英文标题逐条翻译为简体中文。"
+                "只输出一个 JSON 对象，键为数字编号，值为对应翻译，不要输出任何其他内容。"
+            ),
+        },
+        {"role": "user", "content": user_content},
+    ]
+
+    try:
+        client = AIClient(ai_config)
+        raw = client.chat(messages, temperature=0.2, max_tokens=4096)
+        # 提取 JSON（模型可能包裹 ```json ... ``` 或夹杂说明）
+        m = re.search(r"\{.*\}", raw, re.S)
+        if not m:
+            raise ValueError("响应中未找到 JSON")
+        translated = json.loads(m.group(0))
+    except Exception as e:  # noqa: BLE001
+        logger.warning("AI 批量翻译失败（保留原文）: %s", str(e)[:150])
+        return items
+
+    # 回填翻译结果
+    result = []
+    for key, it in mapping.items():
+        zh = (translated.get(key) or "").strip()
+        if zh:
+            new_item = {**it, "title": zh}
+            extra = dict(it.get("extra") or {})
+            extra["original_title"] = it["title"]
+            new_item["extra"] = extra
+            result.append(new_item)
+        else:
+            result.append(it)  # 该条未翻译成功，保留原文
+    logger.info("AI 翻译完成: %d/%d 条", len([x for x in result if x.get("extra", {}).get("original_title")]), len(result))
+    return result
