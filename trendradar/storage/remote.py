@@ -51,6 +51,25 @@ class RemoteStorageBackend(SQLiteStorageMixin, StorageBackend):
     - 运行结束后自动清理临时文件
     """
 
+    @staticmethod
+    def _normalize_boto3_endpoint(endpoint_url: str, bucket: str) -> str:
+        """
+        归一化 boto3 的 endpoint_url。
+
+        若 endpoint 主机名已以 bucket 开头（bucket-in-host 形式，如
+        https://fenix-desktop-1256215811.cos.ap-guangzhou.myqcloud.com），
+        则剥离 bucket 前缀，交还 boto3 virtual 寻址重新前置，避免双重前缀
+        导致的 SSL 证书主机名不匹配。
+        """
+        from urllib.parse import urlparse
+
+        parsed = urlparse(endpoint_url)
+        host = parsed.hostname or ""
+        if bucket and host.startswith(bucket + "."):
+            base_host = host[len(bucket) + 1:]
+            return parsed._replace(netloc=base_host + (f":{parsed.port}" if parsed.port else "")).geturl()
+        return endpoint_url
+
     def __init__(
         self,
         bucket_name: str,
@@ -91,6 +110,11 @@ class RemoteStorageBackend(SQLiteStorageMixin, StorageBackend):
         self.temp_dir = Path(temp_dir) if temp_dir else Path(tempfile.mkdtemp(prefix="trendradar_"))
         self.temp_dir.mkdir(parents=True, exist_ok=True)
 
+        # 归一化 endpoint：fenix-desktop 共用 COS 配置为 bucket-in-host 形式
+        # （如 https://fenix-desktop-1256215811.cos.ap-guangzhou.myqcloud.com），
+        # boto3 virtual 寻址会再前置 bucket 导致双重前缀，此处剥离交给 boto3 处理
+        client_endpoint = self._normalize_boto3_endpoint(endpoint_url, bucket_name)
+
         # 初始化 S3 客户端
         # 使用 virtual-hosted style addressing（主流）
         # 根据服务商选择签名版本：
@@ -105,7 +129,7 @@ class RemoteStorageBackend(SQLiteStorageMixin, StorageBackend):
         )
 
         client_kwargs = {
-            "endpoint_url": endpoint_url,
+            "endpoint_url": client_endpoint,
             "aws_access_key_id": access_key_id,
             "aws_secret_access_key": secret_access_key,
             "config": s3_config,

@@ -102,14 +102,39 @@ def _extract_cards(page) -> List[Dict]:
     return items
 
 
-def _robust_goto(page, url: str, timeout_s: int = 90) -> bool:
+def _warmup(page, homepage: str = "https://www.smzdm.com/") -> None:
+    """
+    预热：先访问首页建立会话（WAF 探测针对首访，首页通过后频道页通常直接可用）。
+    失败不抛出，由后续主页面等待兜底。
+    """
+    try:
+        page.goto(homepage, timeout=30000, wait_until="domcontentloaded")
+        # 等待 probe 自行完成（它可能触发 reload），但只给有限时间
+        for _ in range(6):
+            page.wait_for_timeout(1500)
+            try:
+                if len(page.inner_text("body") or "") > 100:
+                    break
+            except Exception:  # noqa: BLE001
+                break
+    except Exception as e:  # noqa: BLE001
+        logger.warning("smzdm 首页预热失败（忽略）: %s", str(e)[:100])
+
+
+def _robust_goto(page, url: str, timeout_s: int = 120) -> bool:
     """
     访问 smzdm 页面并等待内容出现。
-    WAF 探测阶段页面为空白并可能 reload，此处轮询并自动 reload，直到出现内容或超时。
+
+    WAF（probev3.js）探测阶段页面为空白，probe 执行完成后会自行 reload 到真实内容。
+    策略：
+      1. 前 20 秒不主动 reload（给 probe 时间自行完成）
+      2. 之后若仍空白，每 8 秒主动 reload 一次
+      3. 内容出现（好价卡片 / Tab 栏）即返回 True
     """
     page.goto(url, timeout=45000, wait_until="domcontentloaded")
     deadline = time.time() + timeout_s
     last_reload = 0.0
+    first_pass = 20.0
     while time.time() < deadline:
         # 捕获页面被 reload 后 context 失效的异常
         try:
@@ -118,7 +143,8 @@ def _robust_goto(page, url: str, timeout_s: int = 90) -> bool:
             body_len = 0
         if page.query_selector(".haojia-card-container, .first-single-tab, .first-tabs"):
             return True
-        if body_len == 0 and time.time() - last_reload > 5:
+        elapsed = time.time() - deadline + timeout_s
+        if body_len == 0 and elapsed > first_pass and time.time() - last_reload > 8:
             try:
                 page.reload(wait_until="domcontentloaded", timeout=30000)
                 last_reload = time.time()
@@ -161,56 +187,73 @@ def fetch_digital_deals(
             "error": "playwright 未安装",
         }
 
-    try:
-        with sync_playwright() as p:
-            browser = p.chromium.launch(
-                headless=headless,
-                args=DEFAULT_LAUNCH_ARGS,
-            )
-            ctx = browser.new_context(
-                user_agent=SMZDM_UA,
-                viewport={"width": 1280, "height": 2200},
-                locale="zh-CN",
-                timezone_id="Asia/Shanghai",
-            )
-            page = ctx.new_page()
+    # 外层重试：GitHub Actions 每次 run 可能落到不同出口 IP 段，
+    # 部分 IP 段未被 smzdm 标记，重试可提高命中率
+    max_attempts = 2
+    cards: List[Dict] = []
+    last_error = "smzdm 反爬拦截"
+    for attempt in range(1, max_attempts + 1):
+        try:
+            with sync_playwright() as p:
+                browser = p.chromium.launch(
+                    headless=headless,
+                    args=DEFAULT_LAUNCH_ARGS,
+                )
+                ctx = browser.new_context(
+                    user_agent=SMZDM_UA,
+                    viewport={"width": 1280, "height": 2200},
+                    locale="zh-CN",
+                    timezone_id="Asia/Shanghai",
+                )
+                page = ctx.new_page()
 
-            loaded = _robust_goto(page, url)
-            if not loaded:
-                logger.warning("smzdm 页面被 WAF 拦截（持续空白），本次跳过")
+                # 预热首页建立会话（首访探测在首页完成，频道页成功率更高）
+                _warmup(page)
+
+                loaded = _robust_goto(page, url)
+                if not loaded:
+                    logger.warning("smzdm 页面被 WAF 拦截（尝试 %d/%d），稍后重试", attempt, max_attempts)
+                    browser.close()
+                    if attempt < max_attempts:
+                        time.sleep(3)
+                        continue
+                    return {
+                        "ok": False, "items": [], "total_found": 0,
+                        "fetched_at": now.isoformat(),
+                        "channel_id": "smzdm-digital", "channel_name": "什么值得买·数码低价",
+                        "error": "smzdm 反爬拦截",
+                    }
+
+                # 切换到「相关好价」Tab（好价卡片所在列表）
+                try:
+                    for tab in page.query_selector_all(".first-single-tab"):
+                        if tab.inner_text().strip() == "相关好价":
+                            tab.click()
+                            break
+                    page.wait_for_selector(".haojia-card-container", timeout=15000)
+                except Exception:  # noqa: BLE001
+                    pass
+
+                # 滚动加载更多
+                for _ in range(scroll_rounds):
+                    page.mouse.wheel(0, 3000)
+                    page.wait_for_timeout(700)
+
+                cards = _extract_cards(page)
                 browser.close()
-                return {
-                    "ok": False, "items": [], "total_found": 0,
-                    "fetched_at": now.isoformat(),
-                    "channel_id": "smzdm-digital", "channel_name": "什么值得买·数码低价",
-                    "error": "smzdm 反爬拦截",
-                }
-
-            # 切换到「相关好价」Tab（好价卡片所在列表）
-            try:
-                for tab in page.query_selector_all(".first-single-tab"):
-                    if tab.inner_text().strip() == "相关好价":
-                        tab.click()
-                        break
-                page.wait_for_selector(".haojia-card-container", timeout=15000)
-            except Exception:  # noqa: BLE001
-                pass
-
-            # 滚动加载更多
-            for _ in range(scroll_rounds):
-                page.mouse.wheel(0, 3000)
-                page.wait_for_timeout(700)
-
-            cards = _extract_cards(page)
-            browser.close()
-    except Exception as e:  # noqa: BLE001
-        logger.warning("smzdm 抓取异常: %s", e)
-        return {
-            "ok": False, "items": [], "total_found": 0,
-            "fetched_at": now.isoformat(),
-            "channel_id": "smzdm-digital", "channel_name": "什么值得买·数码低价",
-            "error": str(e)[:200],
-        }
+                break  # 成功，跳出重试
+        except Exception as e:  # noqa: BLE001
+            last_error = str(e)[:200]
+            logger.warning("smzdm 抓取异常（尝试 %d/%d）: %s", attempt, max_attempts, last_error)
+            if attempt < max_attempts:
+                time.sleep(3)
+                continue
+            return {
+                "ok": False, "items": [], "total_found": 0,
+                "fetched_at": now.isoformat(),
+                "channel_id": "smzdm-digital", "channel_name": "什么值得买·数码低价",
+                "error": last_error,
+            }
 
     # 时间过滤（最近 max_age_hours 小时）
     cutoff = now - timedelta(hours=max_age_hours)
