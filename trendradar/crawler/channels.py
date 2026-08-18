@@ -135,7 +135,8 @@ def _parse_smth_top10(html: str) -> List[Dict]:
         items.append({
             "title": title,
             "rank": rank,
-            "url": "",
+            # 十大榜单本身不含帖子直链，指向该话题所属板块（可正常打开浏览）
+            "url": f"https://www.newsmth.net/nForum/board/{section}",
             "category": section,
             "published_at": "",
             "extra": {"section": section, "source": "newsmth"},
