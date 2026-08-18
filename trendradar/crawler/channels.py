@@ -119,9 +119,11 @@ def _parse_smth_top10(html: str) -> List[Dict]:
 
     items: List[Dict] = []
     # 匹配形如：第 1 名 信区 : FamilyLife 标题 : xxx
-    # 条目之间以「第 N 名」分隔
+    # 条目之间以「第 N 名」分隔；最后一名（第 10 名）标题后是页面尾部
+    # 文案（阅读文章 / 返回顶部 / 体验模式），作为结束标记，避免吞掉整个尾部
     pattern = re.compile(
-        r"第\s*(\d+)\s*名\s+信区\s*:\s*([A-Za-z0-9_]+).*?标题\s*:\s*([^|]{4,80}?)(?=\s*第\s*\d+\s*名|$)",
+        r"第\s*(\d+)\s*名\s+信区\s*:\s*([A-Za-z0-9_]+).*?标题\s*:\s*([^|]{4,80}?)"
+        r"(?=\s*第\s*\d+\s*名|阅读文章|返回顶部|体验模式|$)",
         re.S,
     )
     for m in pattern.finditer(text):
