@@ -1722,10 +1722,11 @@ class NewsAnalyzer:
                 print("[存储推送] 未启用任何聚合渠道，跳过")
                 return
 
-            # 统一摘要（所有渠道通用）：AI 功能启用时，为每个渠道的条目生成
-            # 简体中文摘要——已有原文摘要（如 arXiv）则翻译；无摘要的（知乎/水木/
-            # ai-news/未来渠道）基于标题生成一句话中文简介。未来新增渠道自动获得摘要。
-            if ai_config.get("ENABLED"):
+            # 统一摘要（所有渠道通用，默认关闭）：受 extended_channels.summary 开关控制。
+            # AI 功能启用时，为每个渠道的条目生成简体中文摘要——已有原文摘要（如 arXiv）
+            # 则翻译；无摘要的基于标题生成中文简介。批量 LLM 生成较耗时（约 60 条需约
+            # 2 分钟），故默认关闭；需用时在 config.yaml 打开 summary: true。
+            if ext.get("SUMMARY") and ai_config.get("ENABLED"):
                 from trendradar.crawler.channels import generate_chinese_summaries
                 for ch in channels:
                     if ch.get("items"):
