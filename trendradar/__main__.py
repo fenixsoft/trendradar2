@@ -1733,6 +1733,13 @@ class NewsAnalyzer:
                 print("[存储推送] 未启用任何聚合渠道，跳过")
                 return
 
+            # 统一时间兜底：条目未返回文章时间（如知乎热榜、水木十大）时，
+            # 用本次抓取时间作为发布时间，保证面板时间展示一致
+            for ch in channels:
+                for it in ch.get("items", []):
+                    if not it.get("published_at"):
+                        it["published_at"] = now_iso
+
             # 统一摘要（所有渠道通用，默认关闭）：受 extended_channels.summary 开关控制。
             # AI 功能启用时，为每个渠道的条目生成简体中文摘要——已有原文摘要（如 arXiv）
             # 则翻译；无摘要的基于标题生成中文简介。批量 LLM 生成较耗时（约 60 条需约
