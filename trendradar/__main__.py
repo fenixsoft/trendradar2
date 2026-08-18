@@ -1698,6 +1698,17 @@ class NewsAnalyzer:
                     "error": result.get("error", ""),
                     "items": items,
                 })
+            if ext.get("INFOQ"):
+                from trendradar.crawler.channels import fetch_infoq_hot
+                result = fetch_infoq_hot(max_items=20)
+                channels.append({
+                    "id": "infoq",
+                    "name": "InfoQ 技术热点",
+                    "fetched_at": result["fetched_at"],
+                    "status": "ok" if result["ok"] else "error",
+                    "error": result.get("error", ""),
+                    "items": result["items"],
+                })
 
             # smzdm（什么值得买）数码好价渠道（默认关闭，受 WAF 拦截限制）
             smzdm_cfg = config.get("SMZDM", {})

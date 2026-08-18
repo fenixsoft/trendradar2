@@ -420,6 +420,7 @@ def _load_aggregation_config(config_data: Dict) -> Dict:
                 "ARXIV": storage_push.get("extended_channels", {}).get("arxiv", False),
                 "SMTH_DAILY": storage_push.get("extended_channels", {}).get("smth_daily", False),
                 "AI_NEWS": storage_push.get("extended_channels", {}).get("ai_news", False),
+                "INFOQ": storage_push.get("extended_channels", {}).get("infoq", False),
                 "SUMMARY": storage_push.get("extended_channels", {}).get("summary", False),
             },
         },

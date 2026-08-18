@@ -88,17 +88,15 @@ def fetch_arxiv_papers(
         link = entry.find("atom:link", ARXIV_ATOM_NS)
         url = link.get("href") if link is not None else ""
         published = (entry.findtext("atom:published", "", ARXIV_ATOM_NS) or "").strip()
-        summary = (entry.findtext("atom:summary", "", ARXIV_ATOM_NS) or "").strip()
-        summary = re.sub(r"\s+", " ", summary)[:300]
         authors = [a.findtext("atom:name", "", ARXIV_ATOM_NS) for a in entry.findall("atom:author", ARXIV_ATOM_NS)]
         if title and url:
+            # 不含摘要字段（用户要求 arXiv 不展示摘要，连英文原文也不展示）
             items.append({
                 "title": title,
                 "url": url,
                 "published_at": published,
                 "category": category,
                 "authors": authors[:3],
-                "summary": summary,
                 "extra": {"source": "arxiv"},
             })
         if len(items) >= max_results:
@@ -232,6 +230,40 @@ def fetch_ai_news(max_items: int = 20) -> Dict:
             if len(matched) >= max_items:
                 break
     return {"ok": True, "items": matched, "fetched_at": _now_iso(), "error": ""}
+
+
+# ============================================================
+# 3.5 InfoQ 技术热点（infoq.cn RSS feed，服务端可访问）
+#
+# 注：infoq.cn 的「7日热门」排行 API 对数据中心 IP 返回 451（被拦截），
+#     服务端不可直接抓取；此处使用 infoq.cn 官方 RSS feed（最新技术资讯，
+#     服务端 200 可访问）作为替代渠道。
+# ============================================================
+INFOQ_FEED_URL = "https://www.infoq.cn/feed"
+
+
+def fetch_infoq_hot(max_items: int = 20) -> Dict:
+    """
+    抓取 InfoQ 技术资讯（infoq.cn RSS feed）。
+
+    Returns:
+        {"ok": bool, "items": List[Dict], "fetched_at": str, "error": str}
+        item: {"title", "url", "published_at", "category", "extra"}
+    """
+    try:
+        resp = requests.get(INFOQ_FEED_URL, headers=HEADERS, timeout=TIMEOUT)
+        resp.raise_for_status()
+        all_items = _parse_rss_items(resp.text)
+    except Exception as e:  # noqa: BLE001
+        logger.warning("InfoQ 抓取失败: %s", e)
+        return {"ok": False, "items": [], "fetched_at": _now_iso(), "error": str(e)[:150]}
+
+    items = []
+    for it in all_items[:max_items]:
+        it["category"] = "InfoQ"
+        it["extra"] = {"source": "infoq"}
+        items.append(it)
+    return {"ok": True, "items": items, "fetched_at": _now_iso(), "error": ""}
 
 
 # ============================================================
