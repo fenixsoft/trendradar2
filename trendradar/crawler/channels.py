@@ -343,19 +343,25 @@ def generate_chinese_summaries(
     *,
     source_summary: bool = True,
     fallback_from_title: bool = True,
+    max_chars: int = 100,
+    chunk_size: int = 20,
 ) -> List[Dict]:
     """
     当 AI 功能启用时，为条目生成/翻译简体中文摘要（写入 item["summary"]）。
 
     - source_summary=True：基于条目已有的 summary 字段（英文）翻译成中文（arXiv）
-    - fallback_from_title=True：无 summary 时，基于标题生成一句话中文摘要（ai-news 等）
+    - fallback_from_title=True：无 summary 时，基于标题撰写中文简介（ai-news 等）
+    - max_chars：摘要目标长度（约 100 字），提示词中约束
+    - chunk_size：分批调用 LLM 的大小，避免大批量输出超限截断
     摘要生成失败 / AI 未配置 / AI 关闭时，保留原样（不中断发布）。
 
     Args:
         items: 渠道条目列表
         ai_config: config["AI"]
         source_summary: 是否基于已有 summary 翻译
-        fallback_from_title: 无 summary 时是否基于标题生成一句话摘要
+        fallback_from_title: 无 summary 时是否基于标题生成摘要
+        max_chars: 摘要目标字数
+        chunk_size: 每批条目数
 
     Returns:
         带中文摘要的条目列表（失败时等同原文）
@@ -375,58 +381,68 @@ def generate_chinese_summaries(
         logger.warning("AI 摘要跳过：无法导入 AIClient: %s", e)
         return items
 
-    # 构造批量请求：{n: {"t": 标题, "s": 原文摘要(可选)}}
-    mapping = {}
-    numbered = []
-    for i, it in enumerate(items, 1):
+    client_config = dict(ai_config)
+    model = client_config.get("MODEL", "")
+    if model and "/" not in model:
+        client_config["MODEL"] = f"openai/{model}"
+    api_base = client_config.get("API_BASE", "") or ""
+    if api_base and "volces.com" in api_base and "/v3" not in f"{api_base}/":
+        client_config["API_BASE"] = api_base.rstrip("/") + "/v3"
+    client = AIClient(client_config)
+
+    # 汇总表：序号 -> (item, 请求对象)
+    entries = []
+    for it in items:
         title = (it.get("title") or "").strip()
         if not title:
             continue
         src = (it.get("summary") or "").strip()
         if not src and not fallback_from_title:
             continue
-        mapping[str(i)] = it
         obj = {"t": title[:200]}
         if src and source_summary:
-            obj["s"] = src[:400]
-        numbered.append(f'"{i}": ' + json.dumps(obj, ensure_ascii=False))
-    if not numbered:
+            obj["s"] = src[:600]  # 提供更充分原文，支撑 100 字摘要
+        entries.append((it, obj))
+    if not entries:
         return items
 
-    user_content = "{" + ", ".join(numbered) + "}"
+    # 系统提示：摘要目标约 max_chars 字
     system = (
         "你是一名信息聚合编辑。对用户给出的每条内容，输出简体中文摘要。"
-        "规则：若提供了原文摘要(s字段)，将其概括翻译为一段 1-2 句中文；"
-        "若只有标题(t字段)，基于标题写一句中文简介。"
+        f"规则：每条摘要控制在约 {max_chars} 字（最少 90 字、最多 120 字），"
+        "信息要具体、避免空话；若提供了原文摘要(s字段)，基于原文概括翻译；"
+        "若只有标题(t字段)，基于标题撰写有实质内容的简介。"
         '只输出一个 JSON 对象，键为数字编号，值为摘要字符串，不要输出其他内容。'
     )
-    messages = [{"role": "system", "content": system}, {"role": "user", "content": user_content}]
 
-    try:
-        client_config = dict(ai_config)
-        model = client_config.get("MODEL", "")
-        if model and "/" not in model:
-            client_config["MODEL"] = f"openai/{model}"
-        api_base = client_config.get("API_BASE", "") or ""
-        if api_base and "volces.com" in api_base and "/v3" not in f"{api_base}/":
-            client_config["API_BASE"] = api_base.rstrip("/") + "/v3"
-        client = AIClient(client_config)
-        raw = client.chat(messages, temperature=0.2, max_tokens=8192)
-        m = re.search(r"\{.*\}", raw, re.S)
-        if not m:
-            raise ValueError("响应中未找到 JSON")
-        summarized = json.loads(m.group(0))
-    except Exception as e:  # noqa: BLE001
-        logger.warning("AI 摘要生成失败（保留原文）: %s", str(e)[:150])
-        return items
+    result_map = {}
+    for start in range(0, len(entries), chunk_size):
+        chunk = entries[start:start + chunk_size]
+        numbered = []
+        for offset, (it, obj) in enumerate(chunk, 1):
+            numbered.append(f'"{offset}": ' + json.dumps(obj, ensure_ascii=False))
+        user_content = "{" + ", ".join(numbered) + "}"
+        messages = [{"role": "system", "content": system}, {"role": "user", "content": user_content}]
+        try:
+            raw = client.chat(messages, temperature=0.3, max_tokens=8192)
+            m = re.search(r"\{.*\}", raw, re.S)
+            if not m:
+                raise ValueError("响应中未找到 JSON")
+            summarized = json.loads(m.group(0))
+        except Exception as e:  # noqa: BLE001
+            logger.warning("AI 摘要分批 %d 失败（该批保留原文）: %s", start // chunk_size + 1, str(e)[:150])
+            continue
+        for offset, (it, _obj) in enumerate(chunk, 1):
+            zh = (summarized.get(str(offset)) or "").strip()
+            if zh:
+                result_map[id(it)] = zh
 
     result = []
-    for key, it in mapping.items():
-        zh = (summarized.get(key) or "").strip()
+    for it, _obj in entries:
+        zh = result_map.get(id(it))
         if zh:
-            new_item = {**it, "summary": zh}
-            result.append(new_item)
+            result.append({**it, "summary": zh})
         else:
             result.append(it)
-    logger.info("AI 摘要完成: %d/%d 条", len([x for x in result if x.get("summary") and x.get("extra", {}).get("source") in ("arxiv", "hackernews")]), len(result))
+    logger.info("AI 摘要完成: %d/%d 条", len(result_map), len(entries))
     return result
