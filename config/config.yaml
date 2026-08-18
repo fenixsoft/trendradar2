@@ -358,16 +358,22 @@ aggregation:
   storage_push:
     enabled: true                     # 是否启用存储推送渠道（写入 COS，供信息聚合面板读取）
     latest_path: "trendradar/push/latest.json"   # 推送结果对象路径（与面板契约一致）
+    # 作为渠道发布到信息聚合面板的热榜平台 id 列表（如 zhihu 知乎热榜）
+    # 面板会为每个平台生成一个渠道 Tab，实时展示该平台热榜条目
+    platform_channels: ["zhihu"]
 
 
 # ===============================================================
 # 7.6 smzdm（什么值得买）数码好价抓取
 #
+# ⚠️ 当前默认关闭：smzdm 的 WAF 对 GitHub Actions 数据中心出口 IP 稳定拦截，
+#    即便 Playwright 渲染也无法通过（IP 信誉问题）。
+#    如需启用，需配置可访问 smzdm 的住宅/代理出口。
 # 使用 Playwright 渲染真实页面绕过 smzdm 的 JS 反爬挑战。
 # 需在运行环境安装: pip install playwright && playwright install chromium
 # ===============================================================
 smzdm:
-  enabled: true                       # 是否启用 smzdm 数码好价抓取（true=启用, false=关闭）
+  enabled: false                      # 是否启用 smzdm 数码好价抓取（true=启用, false=关闭）
   category_url: "https://www.smzdm.com/fenlei/diannaoshuma/h5c1s0f0t0p1/"   # 电脑数码好价频道
   max_items: 50                       # 最大抓取条数
   max_age_hours: 24                   # 只保留最近 N 小时发布的好价

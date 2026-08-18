@@ -413,6 +413,8 @@ def _load_aggregation_config(config_data: Dict) -> Dict:
         "STORAGE_PUSH": {
             "ENABLED": storage_push.get("enabled", False),
             "LATEST_PATH": storage_push.get("latest_path", "trendradar/push/latest.json"),
+            # 作为渠道发布到面板的热榜平台 id 列表（如 zhihu）
+            "PLATFORM_CHANNELS": storage_push.get("platform_channels", []),
         },
     }
 

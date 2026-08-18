@@ -1609,12 +1609,19 @@ class NewsAnalyzer:
 
         return html_file
 
-    def _publish_to_storage(self) -> None:
+    def _publish_to_storage(
+        self,
+        results: Optional[Dict] = None,
+        id_to_name: Optional[Dict] = None,
+    ) -> None:
         """
         存储推送渠道：将聚合渠道结果写入 COS trendradar/push/latest.json。
 
         每次运行都会执行（不依赖通知调度），保证信息聚合面板始终有最新数据。
-        被 smzdm 反爬拦截时保留该渠道的 blocked 状态，不覆盖已有数据。
+        渠道来源：
+        - 热榜渠道：配置 aggregation.storage_push.platform_channels 指定的平台
+          （如 zhihu 知乎热榜），默认不启用任何平台
+        - smzdm 渠道：配置 smzdm.enabled 时启用（默认关闭，受 smzdm WAF 拦截限制）
         """
         try:
             config = self.ctx.config
@@ -1623,8 +1630,36 @@ class NewsAnalyzer:
                 return
 
             channels = []
+            now_iso = datetime.now().astimezone().isoformat()
 
-            # smzdm（什么值得买）数码好价渠道
+            # 热榜渠道：把指定平台的热榜条目作为渠道发布（面板可立即显示）
+            platform_channels = agg.get("PLATFORM_CHANNELS", [])
+            for pid in platform_channels:
+                if not results or pid not in results or not id_to_name:
+                    continue
+                platform_titles = results[pid]
+                items = []
+                for title, tdata in platform_titles.items():
+                    ranks = tdata.get("ranks", [])
+                    items.append({
+                        "title": title,
+                        "url": tdata.get("url", ""),
+                        "rank": ranks[-1] if ranks else 0,
+                        "published_at": tdata.get("first_time", ""),
+                        "category": "热榜",
+                        "extra": {"platform": pid},
+                    })
+                items.sort(key=lambda x: x.get("rank", 0) if x.get("rank") and x.get("rank") > 0 else 9999)
+                if items:
+                    channels.append({
+                        "id": f"hotlist-{pid}",
+                        "name": f"{id_to_name.get(pid, pid)}热榜",
+                        "fetched_at": now_iso,
+                        "status": "ok",
+                        "items": items,
+                    })
+
+            # smzdm（什么值得买）数码好价渠道（默认关闭，受 WAF 拦截限制）
             smzdm_cfg = config.get("SMZDM", {})
             if smzdm_cfg.get("ENABLED"):
                 result = fetch_digital_deals(
@@ -1649,7 +1684,7 @@ class NewsAnalyzer:
 
             payload = {
                 "version": 1,
-                "pushed_at": datetime.now().astimezone().isoformat(),
+                "pushed_at": now_iso,
                 "report_type": "聚合推送",
                 "channels": channels,
             }
@@ -1687,7 +1722,7 @@ class NewsAnalyzer:
             )
 
             # 存储推送渠道：每次运行发布聚合结果到 COS（信息聚合面板数据源）
-            self._publish_to_storage()
+            self._publish_to_storage(results=results, id_to_name=id_to_name)
 
         except Exception as e:
             print(f"分析流程执行出错: {e}")
