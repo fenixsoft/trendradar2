@@ -421,6 +421,7 @@ def _load_aggregation_config(config_data: Dict) -> Dict:
                 "SMTH_DAILY": storage_push.get("extended_channels", {}).get("smth_daily", False),
                 "AI_NEWS": storage_push.get("extended_channels", {}).get("ai_news", False),
                 "INFOQ": storage_push.get("extended_channels", {}).get("infoq", False),
+                "EMAIL": storage_push.get("extended_channels", {}).get("email", False),
                 "SUMMARY": storage_push.get("extended_channels", {}).get("summary", False),
             },
         },

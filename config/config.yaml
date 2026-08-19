@@ -365,11 +365,15 @@ aggregation:
     #   arxiv       arXiv 热点论文（cs.AI/cs.LG/cs.CL 最新提交）
     #   smth_daily  水木社区每日十大热门话题（BBSLists 自动发帖）
     #   ai_news     AI 圈新概念/新技术（Hacker News 首页 + 关键词过滤）
+    #   email       电子邮件渠道（IMAP 抓取最新未读邮件；账号凭据来自面板
+    #               设置写入的 COS settings.json channels.email.accounts，
+    #               Gmail 用应用专用密码、QQ 邮箱用授权码；每账号最多 10 封）
     extended_channels:
       arxiv: true
       smth_daily: true
       ai_news: true
       infoq: true
+      email: true
       # 是否生成中文摘要（默认关闭：批量 LLM 生成约 60 条约耗时 2 分钟，
       # 拖慢运行；开启后所有渠道的条目将附带 100 字左右中文摘要）
       summary: false

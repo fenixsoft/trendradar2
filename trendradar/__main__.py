@@ -1710,6 +1710,50 @@ class NewsAnalyzer:
                     "items": result["items"],
                 })
 
+            # 电子邮件渠道：账号凭据来自面板写入的 COS settings.json
+            # （channels.email.accounts，Gmail 应用专用密码 / QQ 授权码），
+            # 逐账号抓取最新未读邮件（每账号最多 10 封，只读不标记已读）
+            if ext.get("EMAIL"):
+                from trendradar.crawler.email_fetch import fetch_unread_emails
+                accounts = (
+                    config.get("AGGREGATION_SETTINGS", {})
+                    .get("channels", {})
+                    .get("email", {})
+                    .get("accounts", [])
+                )
+                enabled_accounts = [
+                    a for a in accounts
+                    if isinstance(a, dict) and a.get("enabled") is not False
+                    and a.get("provider") and a.get("address") and a.get("pass")
+                ]
+                email_items = []
+                email_ok = True
+                email_errors = []
+                for acc in enabled_accounts:
+                    result = fetch_unread_emails(
+                        provider=acc["provider"],
+                        address=acc["address"],
+                        pass_=acc["pass"],
+                        limit=10,
+                    )
+                    if result.get("ok"):
+                        email_items.extend(result.get("items", []))
+                    else:
+                        email_ok = False
+                        email_errors.append(
+                            f"{acc['address']}: {result.get('error', '抓取失败')}"
+                        )
+                if enabled_accounts:
+                    channels.append({
+                        "id": "email",
+                        "name": "电子邮件",
+                        "fetched_at": now_iso,
+                        # 有未读条目即视为 ok（部分账号失败仅记录 error 详情，不影响展示）
+                        "status": "ok" if email_items else "error",
+                        "error": "; ".join(email_errors) if email_errors else "",
+                        "items": email_items,
+                    })
+
             # smzdm（什么值得买）数码好价渠道（默认关闭，受 WAF 拦截限制）
             smzdm_cfg = config.get("SMZDM", {})
             if smzdm_cfg.get("ENABLED"):
