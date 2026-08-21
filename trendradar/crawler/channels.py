@@ -14,6 +14,7 @@
 - 时间字段统一为 ISO 字符串，供面板展示
 """
 
+import html
 import json
 import logging
 import re
@@ -40,8 +41,13 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def _parse_rss_items(xml_text: str) -> List[Dict]:
-    """解析 RSS 2.0 条目"""
+def _parse_rss_items(xml_text: str, include_description: bool = False) -> List[Dict]:
+    """解析 RSS 2.0 条目
+
+    Args:
+        xml_text: RSS 2.0 XML 文本
+        include_description: 是否附带 description 原始内容（用于水木等需提取描述的源）
+    """
     items: List[Dict] = []
     root = ET.fromstring(xml_text)
     for item in root.findall(".//item"):
@@ -49,8 +55,39 @@ def _parse_rss_items(xml_text: str) -> List[Dict]:
         link = (item.findtext("link") or "").strip()
         pub = (item.findtext("pubDate") or "").strip()
         if title and link:
-            items.append({"title": title, "url": link, "published_at": pub, "category": "", "extra": {"source": "rss"}})
+            entry = {"title": title, "url": link, "published_at": pub, "category": "", "extra": {"source": "rss"}}
+            if include_description:
+                entry["description"] = (item.findtext("description") or "").strip()
+            items.append(entry)
     return items
+
+
+def _clean_smth_desc(desc: str) -> str:
+    """
+    清洗水木 RSS 描述，提取帖子正文作为描述信息：
+    - 解码 HTML 实体（&nbsp; 等）
+    - 去掉开头的 发信人/信区/标 题/发信站 头部信息，从实际内容开始
+    - 截掉结尾的 ※ 来源:... 部分
+    - 遇到独立的签名分隔符（-- / ~）即截断（其后为发信人签名，非正文）
+    - 去除 HTML 标签、压缩空白
+    """
+    if not desc:
+        return ""
+    desc = html.unescape(desc)
+    # 去掉头部：发信人: ... 站内<br/><br/>
+    desc = re.sub(r"^发信人:.*?站内(?:\s*<br\s*/?>)+", "", desc, flags=re.S)
+    # 截掉结尾来源
+    desc = re.sub(r"※\s*来源:.*$", "", desc, flags=re.S)
+    # 按行处理：去标签、去空行、遇签名分隔符截断
+    lines = []
+    for seg in re.split(r"<br\s*/?>", desc):
+        seg = re.sub(r"<[^>]+>", "", seg).strip()
+        if not seg:
+            continue
+        if seg in ("--", "~", "-", "—"):
+            break
+        lines.append(seg)
+    return re.sub(r"\s+", " ", " ".join(lines)).strip()
 
 
 # ============================================================
@@ -158,7 +195,7 @@ def fetch_smth_daily_top(max_items: int = 10) -> Dict:
         resp = requests.get(SMTH_TOPTEN_RSS_URL, headers=HEADERS, timeout=TIMEOUT)
         resp.raise_for_status()
         xml_text = resp.content.decode("gb2312", errors="replace")
-        all_items = _parse_rss_items(xml_text)
+        all_items = _parse_rss_items(xml_text, include_description=True)
     except Exception as e:  # noqa: BLE001
         logger.warning("水木每日热门抓取失败: %s", e)
         return {"ok": False, "items": [], "fetched_at": _now_iso(), "error": str(e)[:150]}
@@ -180,6 +217,9 @@ def fetch_smth_daily_top(max_items: int = 10) -> Dict:
             "published_at": iso,
             "rank": i,
             "category": "水木",
+            # 描述信息：清洗 RSS 描述（去掉发信人/信区/发信站头部与来源尾部），
+            # 无实际正文时为空字符串
+            "summary": _clean_smth_desc(it.get("description", "")),
             "extra": {"source": "newsmth"},
         })
     return {"ok": True, "items": items, "fetched_at": _now_iso(), "error": ""}
