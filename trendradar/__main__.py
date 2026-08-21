@@ -1744,8 +1744,9 @@ class NewsAnalyzer:
                         "id": "email",
                         "name": "电子邮件",
                         "fetched_at": now_iso,
-                        # 有未读条目即视为 ok（部分账号失败仅记录 error 详情，不影响展示）
-                        "status": "ok" if email_items else "error",
+                        # 抓取流程成功即 ok（0 条新邮件也是正常状态，不应显示为 error）；
+                        # 仅当某账号连接/抓取失败时才标记 error
+                        "status": "ok" if (email_items or email_ok) else "error",
                         "error": "; ".join(email_errors) if email_errors else "",
                         "items": email_items,
                     })
