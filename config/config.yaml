@@ -361,17 +361,36 @@ aggregation:
     # 作为渠道发布到信息聚合面板的热榜平台 id 列表（如 zhihu 知乎热榜）
     # 面板会为每个平台生成一个渠道 Tab，实时展示该平台热榜条目
     platform_channels: ["zhihu"]
+    # RSS 渠道列表：每个源作为信息聚合面板的一个独立渠道 Tab
+    # 配置项：id(唯一标识)、name(显示名称)、url(订阅地址)、max_items(可选，最多条数)
+    # 支持 RSS 2.0 / Atom / JSON Feed 格式
+    rss_channels:
+      - id: "sspai"
+        name: "少数派"
+        url: "https://sspai.com/feed"
+      - id: "v2ex"
+        name: "V2EX"
+        url: "https://v2ex.com/index.xml"
+      - id: "appinn"
+        name: "小众软件"
+        url: "https://feed.appinn.com/"
+      - id: "bmpi"
+        name: "BMPI"
+        url: "https://www.bmpi.dev/index.xml"
+      - id: "iplaysoft"
+        name: "异次元软件世界"
+        url: "https://feed.iplaysoft.com/"
+      - id: "geekplux"
+        name: "GeekPlux"
+        url: "https://geekplux.com/feed.xml"
     # 扩展渠道开关（服务端轻量数据源，无浏览器依赖）：
-    #   arxiv       arXiv 热点论文（cs.AI/cs.LG/cs.CL 最新提交）
-    #   smth_daily  水木社区每日十大热门话题（BBSLists 自动发帖）
-    #   ai_news     AI 圈新概念/新技术（Hacker News 首页 + 关键词过滤）
+    #   smth_daily  水木社区每日十大热门话题（官方 rss/topten）
+    #   infoq       InfoQ 技术热点（infoq.cn 官方 RSS）
     #   email       电子邮件渠道（IMAP 抓取最新未读邮件；账号凭据来自面板
     #               设置写入的 COS settings.json channels.email.accounts，
     #               Gmail 用应用专用密码、QQ 邮箱用授权码；每账号最多 10 封）
     extended_channels:
-      arxiv: true
       smth_daily: true
-      ai_news: true
       infoq: true
       email: true
       # 是否生成中文摘要（默认关闭：批量 LLM 生成约 60 条约耗时 2 分钟，

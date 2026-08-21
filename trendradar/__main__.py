@@ -1659,22 +1659,30 @@ class NewsAnalyzer:
                         "items": items,
                     })
 
-            # 扩展渠道（服务端轻量数据源，无浏览器依赖）
-            ext = agg.get("EXTENDED_CHANNELS", {})
-            # AI 功能启用时对英文标题做中文翻译（ai-news / arxiv）
+            # RSS 渠道：aggregation.storage_push.rss_channels 中配置的每个
+            # RSS 订阅源作为面板的一个独立渠道（支持 RSS 2.0 / Atom / JSON Feed）。
+            # AI 功能启用时对英文标题做中文翻译
             ai_config = config.get("AI", {})
-            if ext.get("ARXIV"):
-                from trendradar.crawler.channels import fetch_arxiv_papers, translate_titles_to_chinese
-                result = fetch_arxiv_papers(max_results=20)
+            for rss_cfg in agg.get("RSS_CHANNELS", []):
+                if not rss_cfg.get("id") or not rss_cfg.get("url"):
+                    continue
+                from trendradar.crawler.channels import fetch_rss_feed, translate_titles_to_chinese
+                result = fetch_rss_feed(
+                    url=rss_cfg["url"],
+                    max_items=int(rss_cfg.get("max_items", 20)),
+                )
                 items = translate_titles_to_chinese(result["items"], ai_config)
                 channels.append({
-                    "id": "arxiv",
-                    "name": "arXiv 热点论文",
+                    "id": rss_cfg["id"],
+                    "name": rss_cfg.get("name", rss_cfg["id"]),
                     "fetched_at": result["fetched_at"],
                     "status": "ok" if result["ok"] else "error",
                     "error": result.get("error", ""),
                     "items": items,
                 })
+
+            # 扩展渠道（服务端轻量数据源，无浏览器依赖）
+            ext = agg.get("EXTENDED_CHANNELS", {})
             if ext.get("SMTH_DAILY"):
                 from trendradar.crawler.channels import fetch_smth_daily_top
                 result = fetch_smth_daily_top(max_items=10)
@@ -1685,18 +1693,6 @@ class NewsAnalyzer:
                     "status": "ok" if result["ok"] else "error",
                     "error": result.get("error", ""),
                     "items": result["items"],
-                })
-            if ext.get("AI_NEWS"):
-                from trendradar.crawler.channels import fetch_ai_news, translate_titles_to_chinese
-                result = fetch_ai_news(max_items=20)
-                items = translate_titles_to_chinese(result["items"], ai_config)
-                channels.append({
-                    "id": "ai-news",
-                    "name": "AI 圈新概念",
-                    "fetched_at": result["fetched_at"],
-                    "status": "ok" if result["ok"] else "error",
-                    "error": result.get("error", ""),
-                    "items": items,
                 })
             if ext.get("INFOQ"):
                 from trendradar.crawler.channels import fetch_infoq_hot

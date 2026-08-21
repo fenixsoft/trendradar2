@@ -3,9 +3,10 @@
 信息聚合渠道抓取器（服务端轻量数据源，无浏览器依赖）
 
 提供信息聚合面板所需的扩展渠道：
-- arXiv 热点论文（官方 Atom API，cs.AI/cs.LG/cs.CL 最新提交）
-- 水木社区每日十大热门话题（BBSLists 版自动发帖，GBK 编码解析）
-- AI 圈新概念/新技术/新架构（Hacker News frontpage RSS + AI 关键词过滤）
+- RSS 渠道（每个 RSS 订阅源作为面板的一个独立渠道）
+- 水木社区每日十大热门话题（官方 rss/topten）
+- InfoQ 技术热点（infoq.cn 官方 RSS）
+- 电子邮件渠道（IMAP 抓取最新未读邮件，见 email_fetch.py）
 
 设计约束：
 - 全部使用标准库 + requests，无 Playwright/Chrome 依赖
@@ -39,68 +40,56 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-# ============================================================
-# 1. arXiv 热点论文
-# ============================================================
-ARXIV_ATOM_NS = {"atom": "http://www.w3.org/2005/Atom", "arxiv": "http://arxiv.org/schemas/atom"}
+def _parse_rss_items(xml_text: str) -> List[Dict]:
+    """解析 RSS 2.0 条目"""
+    items: List[Dict] = []
+    root = ET.fromstring(xml_text)
+    for item in root.findall(".//item"):
+        title = (item.findtext("title") or "").strip()
+        link = (item.findtext("link") or "").strip()
+        pub = (item.findtext("pubDate") or "").strip()
+        if title and link:
+            items.append({"title": title, "url": link, "published_at": pub, "category": "", "extra": {"source": "rss"}})
+    return items
 
 
-def fetch_arxiv_papers(
-    max_results: int = 20,
-    categories: Optional[List[str]] = None,
-) -> Dict:
+# ============================================================
+# 1. 通用 RSS 渠道（aggregation.storage_push.rss_channels）
+#
+# 每个 RSS 订阅源作为信息聚合面板的一个独立渠道。使用 TrendRadar 的
+# RSSParser（feedparser），支持 RSS 2.0 / Atom / JSON Feed 三种格式。
+# ============================================================
+def fetch_rss_feed(url: str, max_items: int = 20) -> Dict:
     """
-    抓取 arXiv 最新提交论文。
+    抓取单个 RSS/Atom/JSON Feed 源，返回面板渠道格式条目。
 
-    仅关注计算机科学（cs.*）与人工智能：搜索限定 AI 核心分类
-    （cs.AI / cs.LG / cs.CL / cs.CV / cs.NE），并按主分类过滤，仅保留
-    主分类以 cs. 开头的论文（排除 stat.* / q-fin.* / math.* 等非 CS 类别）。
+    Args:
+        url: 订阅地址
+        max_items: 最多返回条数
 
     Returns:
         {"ok": bool, "items": List[Dict], "fetched_at": str, "error": str}
-        item: {"title", "url", "published_at", "category", "authors", "summary", "extra"}
+        item: {"title", "url", "published_at"(ISO), "category", "summary", "extra"}
     """
-    cats = categories or ["cs.AI", "cs.LG", "cs.CL", "cs.CV", "cs.NE"]
-    query = "+OR+".join(f"cat:{c}" for c in cats)
-    # 放大抓取量，过滤后仍有足够条数
-    url = (
-        f"https://export.arxiv.org/api/query"
-        f"?search_query={query}&sortBy=submittedDate&sortOrder=descending"
-        f"&max_results={max_results * 2}"
-    )
     try:
+        from trendradar.crawler.rss import RSSParser
         resp = requests.get(url, headers=HEADERS, timeout=TIMEOUT)
         resp.raise_for_status()
-        root = ET.fromstring(resp.text)
+        parsed = RSSParser().parse(resp.text, url)
     except Exception as e:  # noqa: BLE001
-        logger.warning("arXiv 抓取失败: %s", e)
+        logger.warning("RSS 渠道抓取失败 (%s): %s", url, e)
         return {"ok": False, "items": [], "fetched_at": _now_iso(), "error": str(e)[:150]}
 
     items: List[Dict] = []
-    for entry in root.findall("atom:entry", ARXIV_ATOM_NS):
-        cat_el = entry.find("arxiv:primary_category", ARXIV_ATOM_NS)
-        category = cat_el.get("term") if cat_el is not None else ""
-        # 只保留计算机科学（cs.*）主分类的论文
-        if not category.startswith("cs."):
-            continue
-        title = (entry.findtext("atom:title", "", ARXIV_ATOM_NS) or "").strip()
-        title = re.sub(r"\s+", " ", title)
-        link = entry.find("atom:link", ARXIV_ATOM_NS)
-        url = link.get("href") if link is not None else ""
-        published = (entry.findtext("atom:published", "", ARXIV_ATOM_NS) or "").strip()
-        authors = [a.findtext("atom:name", "", ARXIV_ATOM_NS) for a in entry.findall("atom:author", ARXIV_ATOM_NS)]
-        if title and url:
-            # 不含摘要字段（用户要求 arXiv 不展示摘要，连英文原文也不展示）
-            items.append({
-                "title": title,
-                "url": url,
-                "published_at": published,
-                "category": category,
-                "authors": authors[:3],
-                "extra": {"source": "arxiv"},
-            })
-        if len(items) >= max_results:
-            break
+    for it in parsed[:max_items]:
+        items.append({
+            "title": it.title,
+            "url": it.url,
+            "published_at": it.published_at or "",
+            "category": "",
+            "summary": it.summary or "",
+            "extra": {"source": "rss"},
+        })
     return {"ok": True, "items": items, "fetched_at": _now_iso(), "error": ""}
 
 
@@ -197,59 +186,7 @@ def fetch_smth_daily_top(max_items: int = 10) -> Dict:
 
 
 # ============================================================
-# 3. AI 圈新概念 / 新技术 / 新架构（Hacker News + 关键词过滤）
-# ============================================================
-HN_RSS_URL = "https://hnrss.org/frontpage"
-
-# AI 相关关键词（标题命中即视为 AI 圈内容）
-AI_KEYWORDS = [
-    "ai", "llm", "gpt", "openai", "anthropic", "claude", "gemini", "deepseek",
-    "machine learning", "neural", "transformer", "agent", "diffusion", "model",
-    "inference", "training", "fine-tun", "rag", "embedding", "token",
-    "cuda", "gpu", "tpu", "quantiz", "moe", "reasoning", "autonomous",
-]
-
-
-def _parse_rss_items(xml_text: str) -> List[Dict]:
-    """解析 RSS 2.0 条目"""
-    items: List[Dict] = []
-    root = ET.fromstring(xml_text)
-    for item in root.findall(".//item"):
-        title = (item.findtext("title") or "").strip()
-        link = (item.findtext("link") or "").strip()
-        pub = (item.findtext("pubDate") or "").strip()
-        if title and link:
-            items.append({"title": title, "url": link, "published_at": pub, "category": "AI", "extra": {"source": "hackernews"}})
-    return items
-
-
-def fetch_ai_news(max_items: int = 20) -> Dict:
-    """
-    抓取 Hacker News 首页，过滤 AI 圈相关内容作为『AI 圈新概念/新技术』渠道。
-
-    Returns:
-        {"ok": bool, "items": List[Dict], "fetched_at": str, "error": str}
-    """
-    try:
-        resp = requests.get(HN_RSS_URL, headers=HEADERS, timeout=TIMEOUT)
-        resp.raise_for_status()
-        all_items = _parse_rss_items(resp.text)
-    except Exception as e:  # noqa: BLE001
-        logger.warning("HN 抓取失败: %s", e)
-        return {"ok": False, "items": [], "fetched_at": _now_iso(), "error": str(e)[:150]}
-
-    matched = []
-    for it in all_items:
-        title_lower = it["title"].lower()
-        if any(kw in title_lower for kw in AI_KEYWORDS):
-            matched.append(it)
-            if len(matched) >= max_items:
-                break
-    return {"ok": True, "items": matched, "fetched_at": _now_iso(), "error": ""}
-
-
-# ============================================================
-# 3.5 InfoQ 技术热点（infoq.cn RSS feed，服务端可访问）
+# 3. InfoQ 技术热点（infoq.cn RSS feed，服务端可访问）
 #
 # 注：infoq.cn 的「7日热门」排行 API 对数据中心 IP 返回 451（被拦截），
 #     服务端不可直接抓取；此处使用 infoq.cn 官方 RSS feed（最新技术资讯，

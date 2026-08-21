@@ -415,11 +415,11 @@ def _load_aggregation_config(config_data: Dict) -> Dict:
             "LATEST_PATH": storage_push.get("latest_path", "trendradar/push/latest.json"),
             # 作为渠道发布到面板的热榜平台 id 列表（如 zhihu / tieba）
             "PLATFORM_CHANNELS": storage_push.get("platform_channels", []),
-            # 扩展渠道开关（arxiv 热点论文 / smth_daily 水木每日十大 / ai_news AI 圈资讯）
+            # RSS 渠道列表（每个源作为面板的一个独立渠道 Tab）
+            "RSS_CHANNELS": storage_push.get("rss_channels", []),
+            # 扩展渠道开关（smth_daily 水木每日十大 / infoq InfoQ / email 电子邮件）
             "EXTENDED_CHANNELS": {
-                "ARXIV": storage_push.get("extended_channels", {}).get("arxiv", False),
                 "SMTH_DAILY": storage_push.get("extended_channels", {}).get("smth_daily", False),
-                "AI_NEWS": storage_push.get("extended_channels", {}).get("ai_news", False),
                 "INFOQ": storage_push.get("extended_channels", {}).get("infoq", False),
                 "EMAIL": storage_push.get("extended_channels", {}).get("email", False),
                 "SUMMARY": storage_push.get("extended_channels", {}).get("summary", False),
