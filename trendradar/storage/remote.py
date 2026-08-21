@@ -718,40 +718,42 @@ class RemoteStorageBackend(SQLiteStorageMixin, StorageBackend):
         cutoff_date = self._get_configured_time() - timedelta(days=retention_days)
 
         try:
-            # 列出远程存储中 news/ 前缀下的所有对象
+            # 列出远程存储中 news/ 与 rss/ 前缀下的对象（与本地后端保持一致的清理范围，
+            # 避免 rss/ 数据无限累积）
             paginator = self.s3_client.get_paginator('list_objects_v2')
-            pages = paginator.paginate(Bucket=self.bucket_name, Prefix="news/")
-
-            # 收集需要删除的对象键
             objects_to_delete = []
             deleted_dates = set()
 
-            for page in pages:
-                if 'Contents' not in page:
-                    continue
+            for prefix in ("news/", "rss/"):
+                pages = paginator.paginate(Bucket=self.bucket_name, Prefix=prefix)
 
-                for obj in page['Contents']:
-                    key = obj['Key']
-
-                    # 解析日期（格式: news/YYYY-MM-DD.db）
-                    folder_date = None
-                    date_str = None
-                    try:
-                        date_match = re.match(r'news/(\d{4})-(\d{2})-(\d{2})\.db$', key)
-                        if date_match:
-                            folder_date = datetime(
-                                int(date_match.group(1)),
-                                int(date_match.group(2)),
-                                int(date_match.group(3)),
-                                tzinfo=pytz.timezone(self.timezone)
-                            )
-                            date_str = f"{date_match.group(1)}-{date_match.group(2)}-{date_match.group(3)}"
-                    except Exception:
+                # 收集需要删除的对象键
+                for page in pages:
+                    if 'Contents' not in page:
                         continue
 
-                    if folder_date and folder_date < cutoff_date:
-                        objects_to_delete.append({'Key': key})
-                        deleted_dates.add(date_str)
+                    for obj in page['Contents']:
+                        key = obj['Key']
+
+                        # 解析日期（格式: news|rss/YYYY-MM-DD.db）
+                        folder_date = None
+                        date_str = None
+                        try:
+                            date_match = re.match(r'(?:news|rss)/(\d{4})-(\d{2})-(\d{2})\.db$', key)
+                            if date_match:
+                                folder_date = datetime(
+                                    int(date_match.group(1)),
+                                    int(date_match.group(2)),
+                                    int(date_match.group(3)),
+                                    tzinfo=pytz.timezone(self.timezone)
+                                )
+                                date_str = f"{date_match.group(1)}-{date_match.group(2)}-{date_match.group(3)}"
+                        except Exception:
+                            continue
+
+                        if folder_date and folder_date < cutoff_date:
+                            objects_to_delete.append({'Key': key})
+                            deleted_dates.add(f"{key}")
 
             # 批量删除对象（每次最多 1000 个）
             if objects_to_delete:
@@ -767,11 +769,11 @@ class RemoteStorageBackend(SQLiteStorageMixin, StorageBackend):
                     except Exception as e:
                         print(f"[远程存储] 批量删除失败: {e}")
 
-                deleted_count = len(deleted_dates)
-                for date_str in sorted(deleted_dates):
-                    print(f"[远程存储] 清理过期数据: news/{date_str}.db")
+                deleted_count = len(objects_to_delete)
+                for key in sorted(deleted_dates):
+                    print(f"[远程存储] 清理过期数据: {key}")
 
-                print(f"[远程存储] 共清理 {deleted_count} 个过期日期数据库文件")
+                print(f"[远程存储] 共清理 {deleted_count} 个过期数据库文件")
 
             return deleted_count
 
