@@ -374,15 +374,9 @@ aggregation:
       - id: "appinn"
         name: "小众软件"
         url: "https://feed.appinn.com/"
-      - id: "bmpi"
-        name: "BMPI"
-        url: "https://www.bmpi.dev/index.xml"
       - id: "iplaysoft"
         name: "异次元软件世界"
         url: "https://feed.iplaysoft.com/"
-      - id: "geekplux"
-        name: "GeekPlux"
-        url: "https://geekplux.com/feed.xml"
     # 扩展渠道开关（服务端轻量数据源，无浏览器依赖）：
     #   smth_daily  水木社区每日十大热门话题（官方 rss/topten）
     #   infoq       InfoQ 技术热点（infoq.cn 官方 RSS）
